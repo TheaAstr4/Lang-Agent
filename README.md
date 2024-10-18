@@ -18,10 +18,9 @@ Este projeto utiliza a API Groq e LangChain para criar um agente inteligente cap
 
 #  Estrutura do Projeto
 ```bash
-├── agent_1.py        # Código para retornar o tipo de reserva.
-├── agent_2.py        # Função para extração de informaÇÕes do e-mail.
-├── agent_3.py        # Função para consultar o banco de dados.
-├── agent_4.py        # Processa as saidas dos demais agentes.
+├── agent.py          # Classe Agente.
+├── query_agent.py    # Consulta o banco de dados.
+├── main.py           # Codido principal.
 ├── model.py          # Configuração do modelo.
 └── README.md         # Documentação do projeto
 ```
