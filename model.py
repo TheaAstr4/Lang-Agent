@@ -9,7 +9,7 @@ class Model:
             max_tokens=None,
             timeout=None,
             max_retries=2,
-            api_key="XXX"
+            api_key=""
         )
 
     # Método para acessar o modelo

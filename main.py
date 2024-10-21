@@ -1,3 +1,4 @@
+import logging
 from langchain_community.utilities import SQLDatabase
 from model import Model
 from query_agent import Query
@@ -5,59 +6,92 @@ from agent import Agent
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
+import pandas as pd
+import ast
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 console = Console()
+
+# Initialize database connection
 db = SQLDatabase.from_uri("mysql+mysqlconnector://superuser2:senhasupersegura@localhost/Reservas")
 
-if __name__ == "__main__":
-    texto_exemplo = """ """
+def extract_reservation_info(email_text):
+    """Extract relevant information from the reservation email."""
+    template = """
+    Você é um assistente especializado em alocação de laboratórios, extraia as informações do e-mail {input} e retorne apenas os valores de Data da atividade (ANO/MÊS/DIA), Turno, Software(s) a ser(em) utilizado(s), Quantidade de participantes presenciais, Curso e Observações. Sem fornecer explicações adicionais.
+    """
+    agent = Agent(model, template=template, input=email_text, input2=None)
+    response = agent.output()
+    logging.info("Extraído informações da reserva: %s", response.content)
+    return response.content
 
-    # Inicializa o modelo
+def execute_query(query):
+    """Execute the SQL query and return the results."""
+    return db.run(query)
+
+def display_results(results):
+    """Display results in a formatted table."""
+    if not results:
+        console.print("[bold red]Nenhum laboratório encontrado.[/bold red]")
+        return
+    
+    table = Table()
+    columns = ["Professor", "Atividade", "Curso", "GR", "Alunos Matriculados", 
+               "Laboratório", "Data", "Turno", "Status", "Compareceu", 
+               "Capacidade", "Prédio", "Início", "Término", "QTD Máquinas", "ID"]
+    
+    for col in columns:
+        table.add_column(col, justify="center")
+
+    for row in results:
+        table.add_row(*map(str, row))
+    
+    console.print(table)
+
+if __name__ == "__main__":
+    email_text = """
+    
+    """
+    
+    # Initialize the model
     model_instance = Model()
     model = model_instance.get_model()
 
-    # Criando e executando o primeiro agente
-    console.print("[bold yellow] 🤖 Executando o Agente 1...[/bold yellow]")
+    # Step 1: Analyze email to determine if it's a reservation or alteration
     template_1 = """
-            Você é um assistente especializado em analisar e-mails e dizer se o email {input} se refere a uma Reserva ou Alteração. 
-            Responda somente com "Reserva" ou "Alteração".
-                """
-    agente1 = Agent(model, input=texto_exemplo, input2=None, template=template_1)
-    #console.print(f"[bold green]🧾 Prompt: \n {template_1}[/bold green]", justify="full")
-    resposta = agente1.output()
-    console.print(f"[bold yellow]Resposta do Agent 1:[/bold yellow][bold green] {resposta.content}[/bold green]\n")
+    Você é um assistente especializado em analisar e-mails e dizer se o email {input} se refere a uma Reserva ou Alteração. 
+    Responda somente com "Reserva" ou "Alteração".
+    """
+    agent1 = Agent(model, input=email_text, template=template_1, input2=None)
+    reservation_response = agent1.output()
+    logging.info("Agente 1 - Resposta: %s", reservation_response.content)
 
-    if "Reserva" in resposta.content:
-        # Criando e executando o segundo agente
-        console.print("[bold yellow]🤖 Executando o Agente 2...[/bold yellow]\n")
+    #console.print(f"[bold yellow]Resposta do Agente 1:[/bold yellow][bold green] {reservation_response.content}[/bold green]\n")
+
+    # If it's a reservation, proceed to extract information
+    if "Reserva" in reservation_response.content:
+        reservation_info = extract_reservation_info(email_text)
+
+        # Prepare SQL query based on extracted info
+        sql_question = f"""
+        Use as informações presentes em {reservation_info} e responda: 
+        Quais laboratórios estão com o Status diferente de Ocupado e com a capacidade maior ou igual a de Quantidade de participantes presenciais? 
+        **o formato da data deve ser dd/mm/YY**, sem limite de Linhas. **Não use Software e Curso como filtro!**, Retorne todas as colunas da tabela.
+        """
         
-        template_2 = """
-                Você é um assistente especializado em alocação de laboratórios,  extraia as informações do e-mail {input} e retorne apenas os valores de Data da atividade (ANO/MÊS/DIA), Turno, Software(s) a ser(em) utilizado(s), Quantidade de participantes presenciais, Curso e Observações. Sem fornecer explicações adicionais.
-                    """
-        agent2 = Agent(model, template=template_2, input=texto_exemplo, input2=None)
-        #console.print(f"[bold green]🧾 rompt: \n {template_2}[/bold green]", justify="full")
-
-        resposta = agent2.output()
-
-        sql_question = f"""Use as informações presentes em {resposta.content} e responda: Quais laboratórios estão com o Status diferente de Ocupado e com a capacidade maior ou igual a de Quantidade de participantes presenciais? 
-        **o formato da data deve ser dd/mm/YY**, retorne **apenas** os Laboratórios sem limite de Linhas. **Não use Software e Curso como filtro!**.
-       """
-        #console.print(f"[bold green]🧾 Prompt: \n {sql_question}[/bold green]", justify="full")
         query_instance = Query(sql_question, model)
         response = query_instance.RunQuery()
         
-        syntax = Syntax(response[9:], "sql", theme="monokai", line_numbers=True)
-        console.print("[bold yellow]Query executada:[/bold yellow]\n")
-        console.print(syntax,  ' ',  '\n')
-        query = db.run(response[9:])
+        logging.info(f"Query executada: {response[9:]}")
+        
+        # Execute the SQL query
+        results = execute_query(response[9:])
+        results = ast.literal_eval(results)  
+        display_results(results)
 
-        if query == '':
-            print("Nenhum laboratório encontrado.")
-        else:
-            #print(f"Laboratórios encontrados: {query}")
-
-            # Criando e executando o quarto agente
-            #console.print("[bold yellow]🤖 Executando o Agente 3...[/bold yellow]")
+        # If results were found, execute the allocation agent
+        if results:
             template_4 = """
             Você é um assistente especializado em alocação de laboratórios. Sua função é analisar a entrada {input} e compará-la com {input2}, retornando o laboratório mais adequado, seguindo as seguintes regras:
 
@@ -69,18 +103,14 @@ if __name__ == "__main__":
                 2. Compatibilidade de Software:
                     2.1. Alguns laboratórios possuem softwares específicos instalados. Abaixo estão os softwares e seus respectivos laboratórios:
                         - AutoCAD: B09 010, A02 212, E08 101, C08 100o.
-                    2.2. **Priorize laboratórios que atendam tanto à preferência de curso (Regra 1.1) quanto à compatibilidade de software (Regra 2.1)**. Se um laboratório for listado tanto na preferência de curso quanto na lista de compatibilidade de software, ele deve ser escolhido como a **melhor opção**.
-                    2.3. Caso um software seja necessário e entre em conflito com a preferência de curso (Regra 1.1), priorize a compatibilidade de software.
+                    2.2. **Priorize laboratórios que atendam tanto à preferência de curso (Regra 1.1) quanto à compatibilidade de software (Regra 2.1)**. 
 
                 3. Preferência de Laboratório Específico:
-                    3.1. Se {input} contiver um laboratório específico nas observações, ele deve ter prioridade. No entanto, esse laboratório só deve ser escolhido se estiver em conformidade com a Regra 2 (compatibilidade de software).
-                    3.2. Caso o laboratório especificado não seja compatível com a Regra 2, escolha outro laboratório que atenda ao software necessário.
+                    3.1. Se {input} contiver um laboratório específico nas observações, ele deve ter prioridade. 
 
-            Observação: Pequenas variações na escrita dos nomes dos cursos podem ocorrer.
-
-            Saída: Retorne apenas o nome do laboratório selecionado. Priorize o laboratório que atenda tanto à Regra 1.1 quanto à Regra 2.1, caso exista. Caso contrário, siga a compatibilidade de software (Regra 2) para resolver conflitos.
+            Saída: Retorne apenas o nome do laboratório selecionado. 
         """
-            #console.print(f"[bold green]🧾 Prompt: \n {template_4}[/bold green]")
-            agent4 = Agent(model, template=template_4, input=resposta.content, input2=query)
-            resposta = agent4.output()
-            console.print(f"[bold green]Laboratório selecionado:[/bold green] [purple]{resposta.content}[/purple]")
+            agent4 = Agent(model, template=template_4, input=reservation_info, input2=results)
+            selected_lab_response = agent4.output()
+            logging.info("Agente 4 - Laboratório selecionado: %s", selected_lab_response.content)
+            console.print(f"[bold green]Laboratório selecionado:[/bold green] [purple]{selected_lab_response.content}[/purple]")
