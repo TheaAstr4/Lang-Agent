@@ -1,13 +1,18 @@
 import logging
+import requests
 from langchain_community.utilities import SQLDatabase
 from model import Model
 from query_agent import Query
 from agent import Agent
 from rich.console import Console
-from rich.syntax import Syntax
 from rich.table import Table
-import pandas as pd
 import ast
+
+
+url = 'http://127.0.0.1:5000/'
+log_url = 'http://127.0.0.1:5000/logs'
+sql_url = 'http://127.0.0.1:5000/sql'
+mail_url = 'http://127.0.0.1:5000/mail'
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,13 +22,21 @@ console = Console()
 db = SQLDatabase.from_uri("mysql+mysqlconnector://superuser2:senhasupersegura@localhost/Reservas")
 
 def extract_reservation_info(email_text):
-    """Extract relevant information from the reservation email."""
     template = """
-    Você é um assistente especializado em alocação de laboratórios, extraia as informações do e-mail {input} e retorne apenas os valores de Data da atividade (ANO/MÊS/DIA), Turno, Software(s) a ser(em) utilizado(s), Quantidade de participantes presenciais, Curso e Observações. Sem fornecer explicações adicionais.
+    Você é um assistente especializado em alocação de laboratórios, extraia as informações do e-mail {input} e retorne apenas os valores de **Data da atividade (ANO/MÊS/DIA)**, **Turno**, **Software(s) a ser(em) utilizado(s)**, **Quantidade de participantes presenciais**, **Curso** e **Observações**. Sem fornecer explicações adicionais.
     """
     agent = Agent(model, template=template, input=email_text, input2=None)
     response = agent.output()
-    logging.info("Extraído informações da reserva: %s", response.content)
+    content = response.content
+    logging.info("Extraído informações da reserva: %s", content)
+
+    # Data
+    data = {'Data': content.split("/n")}
+
+    # Send data
+    requests.post(log_url, json=data)
+    requests.post(mail_url, json=content)
+
     return response.content
 
 def execute_query(query):
@@ -65,7 +78,18 @@ if __name__ == "__main__":
     """
     agent1 = Agent(model, input=email_text, template=template_1, input2=None)
     reservation_response = agent1.output()
-    logging.info("Agente 1 - Resposta: %s", reservation_response.content)
+    logging.info("Agente 1 - Resposta: %s", reservation_response)
+
+    # Data
+    data = {'Data': str(reservation_response)}
+    # Send data
+    requests.post('http://127.0.0.1:5000/agent1', json=data)
+
+    # Data
+    data = {'Data': str(reservation_response)}
+    # Send data
+    requests.post(log_url, json=data)
+
 
     #console.print(f"[bold yellow]Resposta do Agente 1:[/bold yellow][bold green] {reservation_response.content}[/bold green]\n")
 
@@ -76,17 +100,29 @@ if __name__ == "__main__":
         # Prepare SQL query based on extracted info
         sql_question = f"""
         Use as informações presentes em {reservation_info} e responda: 
-        Quais laboratórios estão com o Status diferente de Ocupado e com a capacidade maior ou igual a de Quantidade de participantes presenciais? 
+        Quais laboratórios estão com o Status diferente de **Ocupado** e com a capacidade maior ou igual a de **Quantidade de participantes presenciais**, e com  a data igual a Data da atividade (ANO/MÊS/DIA) e Turno igual a Turno ? 
         **o formato da data deve ser dd/mm/YY**, sem limite de Linhas. **Não use Software e Curso como filtro!**, Retorne todas as colunas da tabela.
         """
         
         query_instance = Query(sql_question, model)
-        response = query_instance.RunQuery()
-        
-        logging.info(f"Query executada: {response[9:]}")
-        
+        response_sql = query_instance.RunQuery()
+    
+        logging.info(f"Query executada: {response_sql}")
+
+        # Data
+        data = {'Data': str(response_sql)}
+        # Send data
+        requests.post(log_url, json=data)
+
+        # Data
+        data = {'Data': response_sql}
+
+        # Send data
+        requests.post(sql_url, json=data)
+
+    
         # Execute the SQL query
-        results = execute_query(response[9:])
+        results = execute_query(response_sql[9:])
         results = ast.literal_eval(results)  
         display_results(results)
 
@@ -114,3 +150,11 @@ if __name__ == "__main__":
             selected_lab_response = agent4.output()
             logging.info("Agente 4 - Laboratório selecionado: %s", selected_lab_response.content)
             console.print(f"[bold green]Laboratório selecionado:[/bold green] [purple]{selected_lab_response.content}[/purple]")
+
+
+            # Data
+            data = {'Data': str(selected_lab_response)}
+            # Send data
+            requests.post(url, json=data)
+            requests.post(log_url, json=data)
+      

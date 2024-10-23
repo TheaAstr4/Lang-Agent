@@ -9,7 +9,7 @@ class Model:
             max_tokens=None,
             timeout=None,
             max_retries=2,
-            api_key=""
+            api_key="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"
         )
 
     # Método para acessar o modelo
